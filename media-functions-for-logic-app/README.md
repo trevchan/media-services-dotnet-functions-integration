@@ -46,26 +46,39 @@ To enable streaming, go to the Azure portal, select the Azure Media Services acc
 
 ![Screen capture](images/start-se-2.png?raw=true)
 
-## Second Logic App : An advanced VOD workflow
+## Second Logic App : using Azure Storage trigger
+
+This is the same workflow that the first logic app with two main differences:
+- the source is monitored using blob trigger (new file coming to an Azure Storage container)
+- the asset creation / blob copy is done through Azure functions to workaround the limitation of 50 MB. These functions have been tested with 1.8 GB files.
+
+<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2Fmedia-services-dotnet-functions-integration%2Fmaster%2Fmedia-functions-for-logic-app%2Flogicapp2-simplevod-storage-deploy.json" target="_blank">
+    <img src="http://azuredeploy.net/deploybutton.png"/>
+</a>
+
+![Screen capture](images/logicapp2-1.png?raw=true)
+
+## Third Logic App : An advanced VOD workflow
 
 This template creates a Logic app which
 
-* listens to an onedrive folder,
-* copy it to an Azure Media Services asset,
+* monitors a container in Azure Storage (blob trigger),
+* copies new file to an Azure Media Services asset,
 * triggers an encoding job,
 * converts the English audio to text (using Media Indexer v2),
 * translates the English subtitles to French (using Bing translator),
 * copies back the French subtitles to the subtitles asset,
 * publishes the output assets,
 * generates a short playback URL (using bitlink)
-* sends an email with Office365 when the process is complete or if the job failed. In the email, the playback link includes the two subtitles.
+* sends an email with Outlook when the process is complete or if the job failed. In the email, the playback link includes the two subtitles.
 
-<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2Fmedia-services-dotnet-functions-integration%2Fmaster%2Fmedia-functions-for-logic-app%2Flogicapp2-advancedvod-deploy.json" target="_blank">
+<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2Fmedia-services-dotnet-functions-integration%2Fmaster%2Fmedia-functions-for-logic-app%2Flogicapp3-advancedvod-deploy.json" target="_blank">
     <img src="http://azuredeploy.net/deploybutton.png"/>
 </a>
 
-![Screen capture](images/logicapp2-advancedvod-1.png?raw=true)
-![Screen capture](images/logicapp2-advancedvod-2.png?raw=true)
+![Screen capture](images/logicapp3-advancedvod-1.png?raw=true)
+![Screen capture](images/logicapp3-advancedvod-2.png?raw=true)
+![Screen capture](images/logicapp3-advancedvod-3.png?raw=true)
 
 ## Functions documentation
 This section list the functions available and describes the input and output parameters.
@@ -104,7 +117,7 @@ Output:
 }
 ```
 
-### monitor-blob-copy-to-asset
+### check-blob-copy-to-asset-status
 
 This function monitor the copy of files (blobs) to a new asset previously created.
 ```c#
@@ -116,6 +129,8 @@ Input:
 Output:
 {
       "copyStatus": 2 // status
+      "isRunning" : "True"
+      "isSuccessful" : "False"
 }
 ```
 
@@ -148,6 +163,7 @@ Input:
     "hyperlapseSpeed" : "8",                    // Optional, required to hyperlapse the video
     "priority" : 10,                            // Optional, priority of the job
     "useEncoderOutputForAnalytics" : true       // Optional, use generated asset by MES or Premium Workflow as a source for media analytics (except hyperlapse)
+    "jobName" : ""                              // Optional, job name
 }
 
 Output:
@@ -229,11 +245,12 @@ Output:
     "runningDuration" : ""
     "extendedInfo" :			// if extendedInfo is true and job is finished or in error
     {
-        mediaUnitNumber = 2,
-        mediaUnitSize = "S2",
-        otherJobsProcessing = 2;
-        otherJobsScheduled = 1;
-        otherJobsQueue = 1;
+        "mediaUnitNumber" = 2,
+        "mediaUnitSize" = "S2",
+        "otherJobsProcessing" = 2,
+        "otherJobsScheduled" = 1,
+        "otherJobsQueue" = 1,
+        "amsAccountName" = "accountname"
     }
  }
 ```
@@ -260,11 +277,12 @@ Output:
     "runningDuration" : ""
     "extendedInfo" :			// if extendedInfo is true and job is finished or in error
     {
-        mediaUnitNumber = 2,
-        mediaUnitSize = "S2",
-        otherJobsProcessing = 2;
-        otherJobsScheduled = 1;
-        otherJobsQueue = 1;
+        "mediaUnitNumber" = 2,
+        "mediaUnitSize" = "S2",
+        "otherJobsProcessing" = 2,
+        "otherJobsScheduled" = 1,
+        "otherJobsQueue" = 1,
+        "amsAccountName" = "accountname"
     }
  }
 ```
@@ -309,6 +327,50 @@ Output:
  }
 ```
 
+### return-analytics
+
+his function returns media analytics from an asset.
+```c#
+Input:
+{
+    "assetFaceRedactionId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b", // Id of the source asset that contains media analytics (face redaction)
+    "assetMotionDetectionId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b",  // Id of the source asset that contains media analytics (motion detection)
+    "assetOcrId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b",  // Id of the source asset that contains media analytics (OCR)
+    "timeOffset" :"00:01:00", // optional, offset to add to subtitles (used for live analytics)
+    "copyToContainer" : "jpgfaces" // Optional, to copy jpg files to a specific container in the same storage account. Use lowercases as this is the container name and there are restrictions. Used as a prefix, as date is added at the end (yyyyMMdd)
+    "copyToContainerAccountName" : "jhggjgghggkj" // storage account name. optional. if not provided, ams storage account is used
+    "copyToContainerAccountKey" "" // storage account key
+    "deleteAsset" : true // Optional, delete the asset(s) once data has been read from it
+ }
+
+Output:
+{
+    "faceRedaction" :
+        {
+        "json" : "",      // the json of the face redaction
+        "jsonOffset" : "",      // the json of the face redaction with offset
+        "jpgFaces":[
+                {
+                    "id" :24,
+                    "fileId": "nb:cid:UUID:a93464ae-cbd5-4e63-9459-a3e2cf869f0e",
+                    "fileName": "ArchiveTopBitrate_video_800000_thumb000024.jpg",
+                    "url" : "http://xpouyatdemo.streaming.mediaservices.windows.net/903f9261-d745-48aa-8efd-ebcd6e6128d6/ArchiveTopBitrate_video_800000_thumb000024.jpg"
+                }
+                ]
+        "pathUrl" : "",     // the path to the asset if asset is published
+        },
+    "motionDetection":
+        {
+        "json" : "",      // the json of the face redaction
+        "jsonOffset" : ""      // the json of the face redaction with offset
+        }
+    "Ocr":
+        {
+        "json" : "",      // the json of the Ocr
+        "jsonOffset" : ""      // the json of Ocr with offset
+        }
+ }
+```
 
 ### add-textfile-to-asset
 
@@ -447,6 +509,9 @@ Output:
         "programId" = programid,
         "channelName" : "",
         "programName" : "",
-        "programUrl":""
+        "programUrl" : "",
+        "programState" : "Running",
+        "programStateChanged" : "True", // if state changed since last call
+        "otherJobsQueue" = 3 // number of jobs in the queue
 }
 ```

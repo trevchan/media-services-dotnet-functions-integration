@@ -139,13 +139,13 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
             job = _context.Jobs.Where(j => j.Id == job.Id).FirstOrDefault();
         }
 
-        if (job.State == JobState.Error)
+        if (job.State == JobState.Error || job.State == JobState.Canceled)
         {
-            foreach (var task in job.Tasks)
+            foreach (var taskenum in job.Tasks)
             {
-                foreach (var details in task.ErrorDetails)
+                foreach (var details in taskenum.ErrorDetails)
                 {
-                    sberror.AppendLine(details.Message);
+                    sberror.AppendLine(taskenum.Name + " : " + details.Message);
                 }
             }
         }

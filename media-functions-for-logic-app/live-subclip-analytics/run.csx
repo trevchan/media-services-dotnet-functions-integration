@@ -75,6 +75,8 @@ Output:
         "channelName" : "",
         "programName" : "",
         "programUrl":"",
+        "programState" : "Running",
+        "programStateChanged" : "True", // if state changed since last call
         "otherJobsQueue" = 3 // number of jobs in the queue
 }
 */
@@ -142,6 +144,9 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
     string programName = "";
     string channelName = "";
     string programUrl = "";
+    string programState = "";
+    string lastProgramState = "";
+
     IJob job = null;
     ITask taskEncoding = null;
     int NumberJobsQueue = 0;
@@ -208,6 +213,7 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
             });
         }
 
+        programState = program.State.ToString();
         programid = program.Id;
         var asset = GetAssetFromProgram(programid);
 
@@ -259,6 +265,9 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
 
         if (lastendtimeInTable != null)
         {
+            lastProgramState = lastendtimeInTable.ProgramState;
+            log.Info($"Value ProgramState retrieved : {lastProgramState}");
+
             var lastendtimeInTableValue = TimeSpan.Parse(lastendtimeInTable.LastEndTime);
             log.Info($"Value lastendtimeInTable retrieved : {lastendtimeInTableValue}");
 
@@ -332,7 +341,7 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
         log.Info("Job Submitted");
 
         id++;
-        UpdateLastEndTime(table, starttime + duration, programid, id);
+        UpdateLastEndTime(table, starttime + duration, programid, id, program.State);
 
         log.Info($"Output MES index {OutputMES}");
 
@@ -443,6 +452,8 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
         programName = programName,
         programId = programid,
         programUrl = programUrl,
+        programState = programState,
+        programStateChanged = (lastProgramState != programState).ToString(),
         otherJobsQueue = NumberJobsQueue
     });
 }
@@ -455,11 +466,12 @@ public static EndTimeInTable RetrieveLastEndTime(CloudTable table, string progra
     return tableResult.Result as EndTimeInTable;
 }
 
-public static void UpdateLastEndTime(CloudTable table, TimeSpan endtime, string programId, int id)
+public static void UpdateLastEndTime(CloudTable table, TimeSpan endtime, string programId, int id, ProgramState state)
 {
     var EndTimeInTableEntity = new EndTimeInTable();
     EndTimeInTableEntity.ProgramId = programId;
     EndTimeInTableEntity.Id = id.ToString();
+    EndTimeInTableEntity.ProgramState = state.ToString();
     EndTimeInTableEntity.LastEndTime = endtime.ToString();
     EndTimeInTableEntity.AssignPartitionKey();
     EndTimeInTableEntity.AssignRowKey();
@@ -660,6 +672,7 @@ public class EndTimeInTable : TableEntity
     private string programId;
     private string lastendtime;
     private string id;
+    private string programState;
 
     public void AssignRowKey()
     {
@@ -703,6 +716,18 @@ public class EndTimeInTable : TableEntity
         set
         {
             id = value;
+        }
+    }
+    public string ProgramState
+    {
+        get
+        {
+            return programState;
+        }
+
+        set
+        {
+            programState = value;
         }
     }
 }

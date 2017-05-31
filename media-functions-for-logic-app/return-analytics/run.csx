@@ -5,8 +5,11 @@ Input:
 {
     "assetFaceRedactionId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b", // Id of the source asset that contains media analytics (face redaction)
     "assetMotionDetectionId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b",  // Id of the source asset that contains media analytics (motion detection)
+    "assetOcrId" : "nb:cid:UUID:88432c30-cb4a-4496-88c2-b2a05ce9033b",  // Id of the source asset that contains media analytics (OCR)
     "timeOffset" :"00:01:00", // optional, offset to add to subtitles (used for live analytics)
-    "copyToContainer" : "jpgfaces" // Optional, to copy jpg files to a specific container in the same storage account. Use lowercases as this is the container name and there are restrictions
+    "copyToContainer" : "jpgfaces" // Optional, to copy jpg files to a specific container in the same storage account. Use lowercases as this is the container name and there are restrictions. Used as a prefix, as date is added at the end (yyyyMMdd)
+    "copyToContainerAccountName" : "jhggjgghggkj" // storage account name. optional. if not provided, ams storage account is used
+    "copyToContainerAccountKey" "" // storage account key
     "deleteAsset" : true // Optional, delete the asset(s) once data has been read from it
  }
 
@@ -30,6 +33,11 @@ Output:
         {
         "json" : "",      // the json of the face redaction
         "jsonOffset" : ""      // the json of the face redaction with offset
+        }
+    "Ocr":
+        {
+        "json" : "",      // the json of the Ocr
+        "jsonOffset" : ""      // the json of Ocr with offset
         }
  }
 */
@@ -86,6 +94,10 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
     string jsonMotionDetection = "";
     dynamic objMotionDetection = new JObject();
     dynamic objMotionDetectionOffset = new JObject();
+
+    string jsonOcr = "";
+    dynamic objOcr = new JObject();
+    dynamic objOcrOffset = new JObject();
 
     string copyToContainer = "";
     string prefixjpg = "";
@@ -151,6 +163,7 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
                 log.Info($"Asset not published");
             }
 
+            // Let's copy the JPG faces
             if (data.copyToContainer != null)
             {
                 copyToContainer = data.copyToContainer + DateTime.UtcNow.ToString("yyyyMMdd");
@@ -158,7 +171,19 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
                 prefixjpg = outputAsset.Uri.Segments[1] + "-";
                 log.Info($"prefixjpg {prefixjpg}");
                 var sourceContainer = GetCloudBlobContainer(_storageAccountName, _storageAccountKey, outputAsset.Uri.Segments[1]);
-                var targetContainer = GetCloudBlobContainer(_storageAccountName, _storageAccountKey, copyToContainer);
+
+                CloudBlobContainer targetContainer;
+                if (data.copyToContainerAccountName != null)
+                {
+                    // copy to a specific storage account
+                    targetContainer = GetCloudBlobContainer((string)data.copyToContainerAccountName, (string)data.copyToContainerAccountKey, copyToContainer);
+                }
+                else
+                {
+                    // copy to ams storage account
+                    targetContainer = GetCloudBlobContainer(_storageAccountName, _storageAccountKey, copyToContainer);
+                }
+
                 CopyJPGsAsync(sourceContainer, targetContainer, prefixjpg, log);
                 targetContainerUri = targetContainer.Uri.ToString();
             }
@@ -255,6 +280,50 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
             }
         }
 
+
+        //
+        // OCR
+        //
+        if (data.assetOcrId != null)
+        {
+            // Get the asset
+            string assetid3 = data.assetOcrId;
+            var outputAsset3 = _context.Assets.Where(a => a.Id == assetid3).FirstOrDefault();
+
+            if (outputAsset3 == null)
+            {
+                log.Info($"Asset not found {assetid3}");
+                return req.CreateResponse(HttpStatusCode.BadRequest, new
+                {
+                    error = "Asset not found"
+                });
+            }
+
+            var jsonFile3 = outputAsset3.AssetFiles.Where(a => a.Name.ToUpper().EndsWith(".JSON")).FirstOrDefault();
+
+            if (jsonFile3 != null)
+            {
+                jsonOcr = ReturnContent(jsonFile3);
+                objOcr = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonOcr);
+                objOcrOffset = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonOcr);
+
+                if (data.timeOffset != null) // let's update the json with new timecode
+                {
+                    var tsoffset3 = TimeSpan.Parse((string)data.timeOffset);
+                    foreach (var frag in objOcrOffset.fragments)
+                    {
+                        frag.start = ((long)(frag.start / objOcrOffset.timescale) * 10000000) + tsoffset3.Ticks;
+                    }
+                }
+            }
+
+            if (jsonOcr != "" && data.deleteAsset != null && ((bool)data.deleteAsset))
+            // If asset deletion was asked
+            {
+                outputAsset3.Delete();
+            }
+        }
+
     }
     catch (Exception ex)
     {
@@ -279,6 +348,11 @@ public static async Task<object> Run(HttpRequestMessage req, TraceWriter log)
             json = Newtonsoft.Json.JsonConvert.SerializeObject(objMotionDetection),
             jsonOffset = Newtonsoft.Json.JsonConvert.SerializeObject(objMotionDetectionOffset)
         },
+        Ocr = new
+        {
+            json = Newtonsoft.Json.JsonConvert.SerializeObject(objOcr),
+            jsonOffset = Newtonsoft.Json.JsonConvert.SerializeObject(objOcrOffset)
+        }
     });
 }
 
